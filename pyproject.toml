@@ -15,10 +15,10 @@ coding-agent = "coding_agent.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.ruff]
+[tool.ruff.lint]
 select = ["E", "F", "W", "C90", "I"]
 
-[tool.ruff.lint]
+[tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.mypy]
