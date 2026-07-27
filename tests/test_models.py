@@ -82,3 +82,16 @@ def test_run_result_status() -> None:
     )
     assert result.status == "insufficient_context"
     assert result.patch_path is None
+
+
+def test_function_node_creation() -> None:
+    """Test FunctionNode instantiation."""
+    node = FunctionNode(name="foo", start_line=1, end_line=5)
+    assert node.name == "foo"
+    assert node.start_line == 1
+
+
+def test_class_node_creation() -> None:
+    """Test ClassNode instantiation."""
+    node = ClassNode(name="Bar", start_line=10, end_line=20)
+    assert node.name == "Bar"
