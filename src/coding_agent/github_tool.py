@@ -1,0 +1,176 @@
+"""GitHub API tool wrapper."""
+
+from __future__ import annotations
+
+import base64
+import os
+import time
+from typing import Any, cast
+
+import requests
+
+from coding_agent.exceptions import (
+    GitHubAuthError,
+    GitHubError,
+    GitHubNotFoundError,
+    GitHubRateLimitError,
+)
+from coding_agent.trace_logger import TraceLogger
+
+
+class GitHubTool:
+    """Read-only GitHub REST API wrapper with typed errors and trace logging."""
+
+    BASE_URL = "https://api.github.com"
+
+    def __init__(self, trace_logger: TraceLogger) -> None:
+        """Initialize with a trace logger.
+
+        Args:
+            trace_logger: Logger for recording tool calls.
+        """
+        self.trace_logger = trace_logger
+        self.token = os.environ.get("GITHUB_TOKEN", "")
+        self.session = requests.Session()
+        if self.token:
+            self.session.headers["Authorization"] = f"Bearer {self.token}"
+        self.session.headers["Accept"] = "application/vnd.github.v3+json"
+
+    def _call(
+        self,
+        method: str,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make an authenticated GitHub API call with tracing.
+
+        Args:
+            method: HTTP method (GET, POST, etc.).
+            endpoint: API endpoint path (without base URL).
+            params: Optional query parameters.
+
+        Returns:
+            Parsed JSON response.
+
+        Raises:
+            GitHubRateLimitError: On 429 or rate-limit headers.
+            GitHubNotFoundError: On 404.
+            GitHubAuthError: On 401 or 403 auth failures.
+            GitHubError: On other non-2xx responses.
+        """
+        url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+        start = time.perf_counter()
+        error_msg: str | None = None
+        response_data: dict[str, Any] = {}
+
+        try:
+            response = self.session.request(method, url, params=params)
+            if response.status_code == 429:
+                raise GitHubRateLimitError(
+                    f"GitHub rate limit hit: {response.text}"
+                )
+            if response.status_code == 404:
+                raise GitHubNotFoundError(
+                    f"GitHub resource not found: {url}"
+                )
+            if response.status_code in (401, 403):
+                raise GitHubAuthError(
+                    f"GitHub auth failed ({response.status_code}): "
+                    f"{response.text}"
+                )
+            response.raise_for_status()
+            data = cast(dict[str, Any], response.json())
+            response_data = data
+            return data
+        except requests.HTTPError as exc:
+            error_msg = f"GitHub API error: {exc}"
+            raise GitHubError(error_msg) from exc
+        except (
+            GitHubRateLimitError,
+            GitHubNotFoundError,
+            GitHubAuthError,
+        ) as exc:
+            error_msg = str(exc)
+            raise
+        except requests.RequestException as exc:
+            error_msg = f"GitHub request failed: {exc}"
+            raise GitHubError(error_msg) from exc
+        finally:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            self.trace_logger.log(
+                tool_name="github",
+                tool_input={
+                    "method": method,
+                    "endpoint": endpoint,
+                    "params": params,
+                },
+                tool_output=response_data,
+                error=error_msg,
+                duration_ms=duration_ms,
+            )
+
+    def validate_repo(self, owner: str, repo: str) -> dict[str, Any]:
+        """Validate that a repo exists and is accessible.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+
+        Returns:
+            Repo metadata from GitHub.
+        """
+        return self._call("GET", f"/repos/{owner}/{repo}")
+
+    def search_code(
+        self,
+        query: str,
+        per_page: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Search code within GitHub.
+
+        Args:
+            query: Search query string.
+            per_page: Number of results per page.
+
+        Returns:
+            List of search result items.
+        """
+        data = self._call(
+            "GET",
+            "/search/code",
+            params={"q": query, "per_page": per_page},
+        )
+        return data.get("items", [])
+
+    def get_file(self, owner: str, repo: str, path: str) -> str:
+        """Fetch the raw content of a file.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            path: File path within the repo.
+
+        Returns:
+            File content as a string.
+        """
+        data = self._call(
+            "GET", f"/repos/{owner}/{repo}/contents/{path}"
+        )
+        content = data.get("content", "")
+        if content:
+            return base64.b64decode(content).decode("utf-8")
+        return ""
+
+    def get_issue(self, owner: str, repo: str, number: int) -> str:
+        """Fetch issue body text.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            number: Issue number.
+
+        Returns:
+            Issue body text.
+        """
+        data = self._call("GET", f"/repos/{owner}/{repo}/issues/{number}")
+        return data.get("body", "") or ""

@@ -7,7 +7,13 @@ name = "coding-agent"
 version = "0.1.0"
 description = "An AI coding agent that finds and patches bugs in GitHub repos"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "requests>=2.32.3",
+    "groq>=0.9.0",
+    "tree-sitter>=0.22.3",
+    "tree-sitter-python>=0.21.0",
+    "unidiff>=0.7.5",
+]
 
 [project.scripts]
 coding-agent = "coding_agent.cli:main"
@@ -26,3 +32,11 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["unidiff", "requests", "groq.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
