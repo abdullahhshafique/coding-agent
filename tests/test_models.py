@@ -56,6 +56,7 @@ def test_file_structure_defaults() -> None:
     assert struct.classes == []
     assert struct.parse_method == "ast"
     assert not struct.truncated
+    assert struct.raw_content == ""
 
 
 def test_generation_result_validity() -> None:

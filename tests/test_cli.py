@@ -8,16 +8,16 @@ from unittest.mock import patch
 from coding_agent.cli import main
 
 
-def test_cli_fix_not_implemented(capsys) -> None:
-    """Verify the fix command exits cleanly with the placeholder."""
+def test_cli_fix_runs_without_crash(capsys) -> None:
+    """Verify the fix command invokes orchestrator without crashing."""
     with patch.object(
         sys, "argv", ["coding-agent", "fix", "--repo", "x/y", "--issue", "test"]
     ):
-        code = main()
+        with patch("coding_agent.cli.AgentOrchestrator") as mock_orch:
+            mock_orch.return_value.run.return_value.status = "success"
+            code = main()
 
     assert code == 0
-    captured = capsys.readouterr()
-    assert "Not yet implemented" in captured.out
 
 
 def test_cli_missing_issue(capsys) -> None:
