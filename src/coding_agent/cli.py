@@ -6,13 +6,14 @@ import argparse
 import sys
 
 from coding_agent.models import RunRequest
+from coding_agent.orchestrator import AgentOrchestrator
 
 
 def main() -> int:
     """Parse arguments and invoke the agent orchestrator."""
     parser = argparse.ArgumentParser(
         prog="coding-agent",
-        description="AI coding agent that finds and patches bugs in GitHub repos.",
+        description="AI coding agent for GitHub repos.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -20,7 +21,7 @@ def main() -> int:
     fix_parser.add_argument(
         "--repo",
         required=True,
-        help="Repository identifier, e.g. owner/name or a full GitHub URL",
+        help="Repository identifier, e.g. owner/name or GitHub URL",
     )
     fix_parser.add_argument(
         "--issue",
@@ -46,7 +47,10 @@ def main() -> int:
         return 1
 
     if not args.issue and not args.issue_url:
-        print("Error: either --issue or --issue-url must be provided.", file=sys.stderr)
+        print(
+            "Error: either --issue or --issue-url must be provided.",
+            file=sys.stderr,
+        )
         return 1
 
     request = RunRequest(
@@ -56,9 +60,10 @@ def main() -> int:
         tool_call_budget=args.budget,
     )
 
-    print(f"Received request for repo: {request.repo}")
-    print("Not yet implemented.")
-    return 0
+    orchestrator = AgentOrchestrator()
+    result = orchestrator.run(request)
+
+    return 0 if result.status == "success" else 1
 
 
 if __name__ == "__main__":

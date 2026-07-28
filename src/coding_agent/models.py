@@ -57,6 +57,7 @@ class FileStructure:
     classes: list[ClassNode] = field(default_factory=list)
     parse_method: str = "ast"
     truncated: bool = False
+    raw_content: str = ""
 
 
 @dataclass
