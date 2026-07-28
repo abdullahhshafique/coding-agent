@@ -126,22 +126,14 @@ class GitHubTool:
         query: str,
         per_page: int = 10,
     ) -> list[dict[str, Any]]:
-        """Search code within GitHub.
-
-        Args:
-            query: Search query string.
-            per_page: Number of results per page.
-
-        Returns:
-            List of search result items.
-        """
+        """Search code within GitHub."""
         data = self._call(
             "GET",
             "/search/code",
             params={"q": query, "per_page": per_page},
         )
-        return data.get("items", [])
-
+        return cast(list[dict[str, Any]], data.get("items", []))
+    
     def get_file(self, owner: str, repo: str, path: str) -> str:
         """Fetch the raw content of a file.
 
