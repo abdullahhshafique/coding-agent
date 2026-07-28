@@ -1,0 +1,11 @@
+[
+  {
+    "repo": "owner/repo",
+    "issue_number": 1,
+    "issue_url": "https://github.com/owner/repo/issues/1",
+    "issue_title": "Example bug title",
+    "issue_body": "Detailed bug description",
+    "expected_files": ["src/module.py"],
+    "description": "One-line summary of what the fix should do"
+  }
+]

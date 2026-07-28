@@ -66,17 +66,12 @@ class GitHubTool:
         try:
             response = self.session.request(method, url, params=params)
             if response.status_code == 429:
-                raise GitHubRateLimitError(
-                    f"GitHub rate limit hit: {response.text}"
-                )
+                raise GitHubRateLimitError(f"GitHub rate limit hit: {response.text}")
             if response.status_code == 404:
-                raise GitHubNotFoundError(
-                    f"GitHub resource not found: {url}"
-                )
+                raise GitHubNotFoundError(f"GitHub resource not found: {url}")
             if response.status_code in (401, 403):
                 raise GitHubAuthError(
-                    f"GitHub auth failed ({response.status_code}): "
-                    f"{response.text}"
+                    f"GitHub auth failed ({response.status_code}): " f"{response.text}"
                 )
             response.raise_for_status()
             data = cast(dict[str, Any], response.json())
@@ -133,7 +128,7 @@ class GitHubTool:
             params={"q": query, "per_page": per_page},
         )
         return cast(list[dict[str, Any]], data.get("items", []))
-    
+
     def get_file(self, owner: str, repo: str, path: str) -> str:
         """Fetch the raw content of a file.
 
@@ -145,9 +140,7 @@ class GitHubTool:
         Returns:
             File content as a string.
         """
-        data = self._call(
-            "GET", f"/repos/{owner}/{repo}/contents/{path}"
-        )
+        data = self._call("GET", f"/repos/{owner}/{repo}/contents/{path}")
         content = data.get("content", "")
         if content:
             return base64.b64decode(content).decode("utf-8")
