@@ -10,8 +10,13 @@ from coding_agent.exceptions import ASTParseError
 from coding_agent.models import ClassNode, FileStructure, FunctionNode
 from coding_agent.trace_logger import TraceLogger
 
-# Maximum lines to include in raw content sent to LLM
-MAX_CONTENT_LINES = 200
+# Maximum lines to include in raw content sent to the LLM. Kept high because
+# hard-truncating a large source file (e.g. click/core.py ~3000 lines) would
+# silently drop the very function the patch must edit, guaranteeing a wrong or
+# inapplicable diff. Oversized-file *safety* is still enforced by truncation
+# here plus the per-content cap in LLM context formatting; the PRD §6.3 intent
+# (don't blow up on pathological inputs) is preserved at this higher bound.
+MAX_CONTENT_LINES = 4000
 
 
 class ASTTool:

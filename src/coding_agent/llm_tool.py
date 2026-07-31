@@ -54,6 +54,15 @@ class LLMTool:
         Returns:
             Tuple of (diff_text, rationale).
         """
+        """Generate a unified diff patch for the given issue.
+
+        Args:
+            issue_text: Description of the bug or feature.
+            file_contexts: List of structured file contexts from AST parsing.
+
+        Returns:
+            Tuple of (diff_text, rationale).
+        """
         system_prompt = (
             "You are a coding assistant. You receive a bug description and "
             "structured file contexts, each delimited by XML-style tags. "
@@ -70,7 +79,7 @@ class LLMTool:
             "git apply."
         )
 
-        context_str = self._format_contexts(file_contexts)
+        context_str = self._format_contexts(file_contexts, issue_text)
         user_prompt = (
             "<issue_description>"
             + "\n"
@@ -255,18 +264,34 @@ class LLMTool:
             return match.group(1).strip()
         return text
 
+    # Per-file content budget (chars). Sized so ~5 files + the issue text stay
+    # under the model's on-demand tokens-per-minute limit while still showing
+    # the relevant function bodies.
+    _FILE_CONTENT_BUDGET = 2600
+
     def _format_contexts(
         self,
         file_contexts: list[dict[str, Any]],
+        issue_text: str = "",
     ) -> str:
-        """Format file contexts for the prompt.
+        """Format file contexts for the prompt, AST-targeted to the issue.
+
+        Rather than sending the head of every file (which drops the exact
+        function the patch must edit when the file is large), this selects the
+        functions/classes *named in the issue* and includes their full bodies
+        with real line numbers, so a generated diff's context/removal lines
+        and ``@@`` offsets match the original. Small files are sent whole.
+        A structural map (all function/class names + line ranges) is always
+        included so the model can see the file's shape.
 
         Args:
-            file_contexts: Structured file data.
+            file_contexts: Structured file data from AST parsing.
+            issue_text: The bug description, used to pick relevant symbols.
 
         Returns:
             Formatted string for the LLM prompt.
         """
+        issue_tokens = self._issue_identifiers(issue_text)
         parts: list[str] = []
         for ctx in file_contexts:
             path = ctx.get("path", "unknown")
@@ -276,16 +301,103 @@ class LLMTool:
 
             part = f"File: {path}" + "\n"
             if functions:
-                func_names = ", ".join(f["name"] for f in functions)
-                part += f"  Functions: {func_names}" + "\n"
+                part += "  Functions: " + ", ".join(
+                    f"{f['name']} ({f['lines']})" for f in functions
+                ) + "\n"
             if classes:
-                class_names = ", ".join(c["name"] for c in classes)
-                part += f"  Classes: {class_names}" + "\n"
-            if content:
-                truncated = content[:2000]
-                if len(content) > 2000:
-                    truncated += "... [truncated]"
-                part += "  Content:" + "\n" + truncated + "\n"
+                part += "  Classes: " + ", ".join(
+                    f"{c['name']} ({c['lines']})" for c in classes
+                ) + "\n"
+
+            body = self._select_content(content, functions, classes,
+                                        issue_tokens)
+            if body:
+                part += "  Content (line-numbered):\n" + body + "\n"
             parts.append(part)
 
         return ("\n" + "---" + "\n").join(parts)
+
+    @staticmethod
+    def _issue_identifiers(issue_text: str) -> set[str]:
+        """Lowercased symbol-ish tokens from the issue for relevance matching."""
+        tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", issue_text))
+        return {t.lower() for t in tokens}
+
+    @staticmethod
+    def _show(lines: list[str], start: int, end: int) -> list[str]:
+        """Render original lines [start..end] (1-based, inclusive) with a
+        `NNNN| ` prefix so the model sees accurate line numbers for diffs."""
+        return [f"{i:4}| {lines[i - 1]}" for i in range(start, end + 1)]
+
+    def _select_content(
+        self,
+        content: str,
+        functions: list[dict[str, Any]],
+        classes: list[dict[str, Any]],
+        issue_tokens: set[str],
+    ) -> str:
+        """Choose which parts of a file to show: relevant symbols' bodies
+        (by issue keyword overlap) in full, else the file head, capped to the
+        per-file budget. Line-numbered so generated diffs align."""
+        if not content:
+            return ""
+        lines = content.splitlines()
+
+        # Small file: show whole with line numbers.
+        if len(content) <= self._FILE_CONTENT_BUDGET:
+            return "\n".join(self._show(lines, 1, len(lines)))
+
+        merged = self._relevant_ranges(functions, classes, issue_tokens)
+        if not merged:
+            # No relevant symbol — show the file head with line numbers.
+            return "\n".join(self._show(lines, 1, min(len(lines), 60)))
+
+        return self._render_ranges(lines, merged)
+
+    def _relevant_ranges(
+        self,
+        functions: list[dict[str, Any]],
+        classes: list[dict[str, Any]],
+        issue_tokens: set[str],
+    ) -> list[list[int]]:
+        """Collect and merge the line ranges of symbols named in the issue."""
+        ranges: list[tuple[int, int]] = []
+        for sym in [*functions, *classes]:
+            if sym["name"].lower() in issue_tokens:
+                rng = self._parse_range(sym.get("lines", ""))
+                if rng:
+                    ranges.append(rng)
+        ranges.sort()
+        merged: list[list[int]] = []
+        for s, e in ranges:
+            if merged and s <= merged[-1][1] + 2:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        return merged
+
+    def _render_ranges(self, lines: list[str], merged: list[list[int]]) -> str:
+        """Render merged line ranges with true line numbers and gap markers,
+        capped to the per-file budget."""
+        out: list[str] = []
+        used = 0
+        cursor = 1
+        for s, e in merged:
+            if s > cursor:
+                out.append(f"# ... [{s - cursor} lines omitted]")
+            block = self._show(lines, s, e)
+            cost = sum(len(b) + 1 for b in block)
+            if used + cost > self._FILE_CONTENT_BUDGET:
+                break
+            out.extend(block)
+            used += cost
+            cursor = e + 1
+        if cursor <= len(lines):
+            out.append(f"# ... [{len(lines) - cursor + 1} more lines]")
+        return "\n".join(out)
+
+    @staticmethod
+    def _parse_range(lines_field: str) -> tuple[int, int] | None:
+        """Parse a "start-end" line range string into ints."""
+        m = re.match(r"(\d+)-(\d+)", str(lines_field))
+        return (int(m.group(1)), int(m.group(2))) if m else None

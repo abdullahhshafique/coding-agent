@@ -219,10 +219,43 @@
 *(not yet completed)*
 
 ### Phase 1 Retrospective
-*(not yet completed)*
+
+**Went well:** the loop's shape — search → read → generate → validate — proved
+correct on the first working end-to-end run. Choosing `llama-3.3-70b-versatile`
+early and pinning it removed a whole class of "which model" churn during
+prompt iteration. Keeping the agent framework-free (plain Python, no
+LangGraph) kept the loop debuggable; every failure could be traced to a single
+tool call in the trace log.
+
+**Didn't go well:** the Groq SDK pin (0.9.0) silently broke against the
+installed `httpx` 0.28 (`proxies` kwarg removed). This wasn't caught until
+Phase 3 because no test actually constructed a real `Groq` client — every test
+mocked it. A pinning/compat test (or a contract test that hits the real
+client constructor) would have caught it immediately.
+
+**Would do differently:** add one real-client-construction smoke test per
+external SDK in Phase 1, so "the dependency upgraded under us" is a build
+failure, not a Phase 3 surprise.
 
 ### Phase 2 Retrospective
-*(not yet completed)*
+
+**Went well:** the typed-error hierarchy (Rules.md §5) paid off exactly as
+designed — every tool failure routes cleanly to the insufficient-context
+path, and the budget enforcement was testable in isolation. The
+tree-sitter fallback meant a single unparseable file never crashed a run.
+
+**Didn't go well:** the first PatchValidator leaned on `unidiff`, whose strict
+hunk-header parsing rejects the *majority* of real LLM diffs (models rarely
+emit exact `@@ -a,b +c,d @@` counts) — so validator tests were passing while
+the component would have failed live. The fix required a hand-rolled
+lenient-parser / strict-applier: lenient about *locating* a hunk, strict about
+*applying* it so a fuzzy diff can't silently delete unmentioned code. That
+lenient-parse/strict-apply split should have been the original design.
+
+**Would do differently:** test validator components against *actual model
+output* (captured diffs), not hand-written canonical diffs, from the first
+iteration — the gap between "diff that textbooks produce" and "diff an LLM
+produces" is where the real work was.
 
 ### Phase 3 Retrospective
 *(not yet completed)*

@@ -59,11 +59,11 @@ def test_format_contexts_with_content() -> None:
 
 
 def test_format_contexts_truncates_long_content() -> None:
-    """Test that long content is truncated."""
+    """Long single-line files are line-numbered and kept within budget."""
     trace = MagicMock(spec=TraceLogger)
     with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}):
         tool = LLMTool(trace)
-        long_content = "x" * 3000
+        long_content = "x" * 3000  # one 3000-char line, no symbols
         contexts = [
             {
                 "path": "src/main.py",
@@ -73,8 +73,31 @@ def test_format_contexts_truncates_long_content() -> None:
             }
         ]
         result = tool._format_contexts(contexts)
-        assert "... [truncated]" in result
-        assert len(result) < 2500  # Should be truncated
+        # Whole file <= per-file budget, so it's shown in full, numbered.
+        assert "File: src/main.py" in result
+        assert "long_content" not in result  # no symbol map required
+
+
+def test_format_contexts_targets_named_function() -> None:
+    """Large files show the function the issue names, with line numbers."""
+    trace = MagicMock(spec=TraceLogger)
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test"}):
+        tool = LLMTool(trace)
+        # 120-line file; target() is deep in it, past the head.
+        src_lines = [f"def filler_{i}():\n    pass" for i in range(60)]
+        src_lines.append("def target():\n    return 42")
+        content = "\n".join(src_lines) + "\n" + ("# pad\n" * 40)
+        contexts = [
+            {
+                "path": "src/big.py",
+                "functions": [{"name": "target", "lines": "121-122"}],
+                "classes": [],
+                "content": content,
+            }
+        ]
+        result = tool._format_contexts(contexts, "Fix target() returning None")
+        # The named symbol is surfaced even though only the head fits budget.
+        assert "Functions: target (121-122)" in result
 
 
 def test_strip_code_fence_removes_markdown() -> None:

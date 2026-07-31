@@ -22,6 +22,10 @@ class GitHubTool:
     """Read-only GitHub REST API wrapper with typed errors and trace logging."""
 
     BASE_URL = "https://api.github.com"
+    # GitHub rate-limits code search to 10 requests/minute for authenticated
+    # users; self-throttle search calls to respect it and avoid 429s during
+    # evaluation. Class attribute so tests can set it to 0.
+    SEARCH_MIN_INTERVAL_SECONDS = 6.2
 
     def __init__(self, trace_logger: TraceLogger) -> None:
         """Initialize with a trace logger.
@@ -35,6 +39,15 @@ class GitHubTool:
         if self.token:
             self.session.headers["Authorization"] = f"Bearer {self.token}"
         self.session.headers["Accept"] = "application/vnd.github.v3+json"
+        self._last_search_at = 0.0
+
+    def _throttle_search(self) -> None:
+        """Sleep if needed to respect the code-search rate limit."""
+        elapsed = time.perf_counter() - self._last_search_at
+        wait = self.SEARCH_MIN_INTERVAL_SECONDS - elapsed
+        if wait > 0:
+            time.sleep(wait)
+        self._last_search_at = time.perf_counter()
 
     def _call(
         self,
@@ -128,7 +141,12 @@ class GitHubTool:
         query: str,
         per_page: int = 10,
     ) -> list[dict[str, Any]]:
-        """Search code within GitHub."""
+        """Search code within GitHub.
+
+        Code search has a tight rate limit (10 req/min), so self-throttle to
+        avoid 429s and a mid-run rate-limit failure during evaluation.
+        """
+        self._throttle_search()
         data = self._call(
             "GET",
             "/search/code",

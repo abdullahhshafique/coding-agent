@@ -1,11 +1,184 @@
 [
   {
-    "repo": "psf/requests",
-    "issue_number": 1648,
-    "issue_url": "https://github.com/psf/requests/issues/1648",
-    "issue_title": "Header \"Transfer-Encoding: chunked\" set even if Content-Length is provided which causes body to not actually get chunked",
-    "issue_body": "When making a request with both a body and a Content-Length header, Requests incorrectly adds Transfer-Encoding: chunked, which causes the body to not actually get chunked as expected. This breaks compatibility with servers that expect proper chunked encoding when the header is present.\n\nReproduction:\n```python\nimport requests\nimport json\n\nheaders = {'Content-Length': '13', 'Content-Type': 'application/json'}\ndata = json.dumps({'test': 'data'})\nresponse = requests.post('https://httpbin.org/post', data=data, headers=headers)\n```\n\nThe resulting request has both Content-Length and Transfer-Encoding: chunked, which is invalid per HTTP/1.1 specifications (RFC 7230 Section 3.3.2).",
-    "expected_files": ["requests/models.py", "requests/sessions.py", "requests/adapters.py"],
-    "description": "Prevent setting Transfer-Encoding: chunked when Content-Length is explicitly provided"
+    "repo": "pallets/click",
+    "issue_number": 2819,
+    "issue_url": "https://github.com/pallets/click/issues/2819",
+    "issue_title": "help not resolving automatically",
+    "issue_body": "From the docs: \r\n\r\nThe help parameter is implemented in Click in a very special manner. Unlike regular parameters it\u2019s automatically added by Click for any command and it performs automatic conflict resolution. By default it\u2019s called --help, but this can be changed. If a command itself implements a parameter with the same name, the default help parameter stops accepting it. There is a context setting that can be used to override the names of the help parameters called [help_option_names](https://click.palletsprojects.com/en/stable/api/#click.Context.help_option_names).\r\n\r\nWhat is wrong: \r\nHelp does not automatically resolve if there is an arg or kwarg called help. In the sample the file is called help.py\r\n\r\n``` \r\nimport click\r\n\r\n# This works \r\n@click.command()\r\n@click.argument('helps')\r\ndef this_works(helps):\r\n    print(helps)\r\n\r\n# > python -m help this\r\n# this\r\n\r\n# > python -m help --help\r\n# Usage: help.py [OPTIONS] HELPS\r\n\r\n# Options:\r\n#   --help  Show this message and exit.\r\n\r\n# This does not work\r\n@click.command()\r\n@click.argument('help')\r\ndef this_does_not_work(help):\r\n    print(help)\r\n\r\n# > python -m help this\r\n# Usage: help.py [OPTIONS] HELP\r\n# Try 'help.py --help' for help.\r\n\r\n# Error: Invalid value for '--help': 'this' is not a valid boolean.\r\n\r\n# > python -m help --help\r\n# Usage: help.py [OPTIONS] HELP\r\n# Try 'help.py --help' for help.\r\n\r\n# Error: Missing argument 'HELP'.\r\n\r\n# This does not work\r\n@click.command()\r\n@click.option('--help', default='this_2')\r\ndef this_does_not_work_also(help='this_2'):\r\n    print(help)\r\n\r\n# > python -m help \r\n# None\r\n\r\n# > python -m help --help\r\n# Error: Option '--help' requires an argument.\r\n\r\nif __name__ == '__main__':\r\n    #this_works()\r\n    #this_does_not_work()\r\n    this_does_not_work_also()\r\n\r\n```\r\n- Python version: 3.10.15\r\n- Click version: 8.1.7",
+    "expected_files": [
+      "src/click/core.py"
+    ],
+    "description": "Patch should address: help not resolving automatically"
+  },
+  {
+    "repo": "pallets/click",
+    "issue_number": 2809,
+    "issue_url": "https://github.com/pallets/click/issues/2809",
+    "issue_title": "`@click.Option` with `'hide_input' = True` (used for password) and custom `type` parameter doesn't show custom error message",
+    "issue_body": "I use @click.Option with 'hide_input' = True and custom 'type' parameter for password prompt with raise click.BadParameter (it inheriths class UsageError). And if the password failed the code doesn't show custom error message, but standard message \"Error: The value you entered was invalid\"\n\nStandard message comes from termui.py file: ~172 line - \n```python\n        except UsageError as e:\n            if hide_input:\n                echo(_(\"Error: The value you entered was invalid.\"), err=err)\n            else:\n                echo(_(\"Error: {e.message}\").format(e=e), err=err)  # noqa: B306\n            continue\n```\nBecause it checks hide_input parameter and if it True (and it is really True as i hide_input because of the password) it give the error \"Error: The value you entered was invalid\". When hide_input is False - it gives me my custom message.\n\nIf i use click.ClickException exception class it give me my error, but stops the promt, so i have to start from the beginning.\nIf i make hide_input = False - the password is visible on the screen and i recieve my custom message. But it is wrong for password entry.\n\nHere is the example how to replicate my error. \nRun the code and enter \"1234\".\nThe message i expect \"Error: Your password is week. Use 'Minimum eight characters, at least one letter and one number\"\n\n```python\nimport click\nimport re\n\nclass PassRequirement(click.ParamType):\n    \"\"\"Click check class for password\"\"\"\n\n    name = \"Password requirements\"\n\n    def convert(self, value, param, ctx):\n        pw_req = \"Minimum eight characters, at least one letter and one number\"\n        pw_strength = r\"^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$\"\n\n        if re.match(pw_strength, value):\n            return value\n\n        self.fail(f\"Your password is week. Use {pw_req!r}\", param, ctx)\n\n    def fail(self, message=\"\", param=None, ctx=None):\n        raise click.BadParameter(message, ctx, param)\n        # raise click.ClickException(message) - # works well, shows my message, but stops the promt, so i have to start the command from the beginning.\n\nPASS_REQUIREMENT = PassRequirement()\n\n@click.command()\n@click.option(\"-password\", help=\"Password\", prompt=True, confirmation_prompt=True, hide_input=True,\n              type=PASS_REQUIREMENT)\ndef pw(password):\n    print(f'PASSWORD: {password}')\n\n\nif __name__ == '__main__':\n    pw()\n\n```\n\nEnvironment:\n- Python version: 3.12.7\n- Click version: 8.1.7",
+    "expected_files": [
+      "src/click/termui.py"
+    ],
+    "description": "Patch should address: `@click.Option` with `'hide_input' = True` (used for password) and custom `type` parameter doesn't show custom error mes"
+  },
+  {
+    "repo": "pallets/click",
+    "issue_number": 3360,
+    "issue_url": "https://github.com/pallets/click/issues/3360",
+    "issue_title": "Empty output from `HelpFormatter.write_usage` for a program without arguments",
+    "issue_body": "If no `args` are passed to `HelpFormatter.write_usage`, the Usage line is not printed.\n\n### Reproduction\n\n```python\nimport click\n\nf = click.HelpFormatter()\nf.write_usage(\"program\")\nprint(f.getvalue())\n```\n<!--\nDescribe how to replicate the bug.\n\nInclude a minimal reproducible example that demonstrates the bug.\nInclude the full traceback if there was an exception.\n-->\n\n### Expected output\n```\nUsage: program\n```\n\n### Actual output\n(an empty line)\n\n### Environment\n\n- Python version: 3.12.3\n- Click version: 8.3.1\n\n### Additional information\n\nWe use `click` for a CLI program with interactive mode. We are about to use `click.HelpFormatter` to print help for internal commands, some of which do not accept any arguments (`exit`, for example).",
+    "expected_files": [
+      "src/click/formatting.py"
+    ],
+    "description": "Patch should address: Empty output from `HelpFormatter.write_usage` for a program without arguments"
+  },
+  {
+    "repo": "pallets/click",
+    "issue_number": 3403,
+    "issue_url": "https://github.com/pallets/click/issues/3403",
+    "issue_title": "\"default\" behaviour in Click 8.3.x changes with enable/disable boolean flag pair",
+    "issue_body": "In click 8.2.1, defining a boolean option with both a \"enable\" and \"disable\" flag option works with the following logic:\n```\nimport click\n\n@click.command(\"foo\")\n@click.option(\"--without-xyz\", \"enable_xyz\", flag_value=False)\n@click.option(\"--with-xyz\", \"enable_xyz\", flag_value=True, default=True)\ndef foo(enable_xyz):\n    print(f\"enable_xyz = {enable_xyz}\")\n\nfoo()\n```\n\nWith this code, using click 8.2.1:\n* `python foo.py --with-xyz` returns True\n* `python foo.py --without-xyz` returns False\n* `python foo.py --with-xyz --without-xyz` returns False\n* `python foo.py --without-xyz --with-xyz` returns True\n* `python foo.py` returns False\n\nIn click 8.3.0, the output is the same for every case except the \"default\"  case - `python foo.py` returns True.\n\nThis is an extension of #3111; this [pattern is used in MkDocs](https://github.com/mkdocs/mkdocs/blob/2862536793b3c67d9d83c33e0dd6d50a791928f8/mkdocs/__main__.py#L257) (as of MkDocs 1.6.1) (see mkdocs/mkdocs#4032).\n\nHowever, the fix for #3111 (#3239) doesn't fix this edge case.\n\nThe Properdocs fork of MkDocs [has worked around the issue](https://github.com/ProperDocs/properdocs/pull/14/files).\n\nEnvironment:\n\n- Python version: 3.12, 3.13, 3.14\n- Click version: 8.3.0, 8.3.3",
+    "expected_files": [
+      "src/click/core.py"
+    ],
+    "description": "Patch should address: \"default\" behaviour in Click 8.3.x changes with enable/disable boolean flag pair"
+  },
+  {
+    "repo": "pallets/click",
+    "issue_number": 3067,
+    "issue_url": "https://github.com/pallets/click/issues/3067",
+    "issue_title": "`pyright --verifytypes` reports incomplete coverage",
+    "issue_body": "I use `pyright --verifytypes` on https://github.com/adamtheturtle/doccmd and with 8.3.0 I get the following errors:\n\n```\nModule name: \"doccmd\"\nPackage directory: \"/Users/adam/Documents/repositories/doccmd/src/doccmd\"\nModule directory: \"/Users/adam/Documents/repositories/doccmd/src/doccmd\"\nPath of py.typed file: \"/Users/adam/Documents/repositories/doccmd/src/doccmd/py.typed\"\n\nPublic modules: 2\n   doccmd\n   doccmd.__main__\n\nSymbols used in public interface:\nclick.core.Command.get_help_option\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:1044:9 - error: Return type is partially unknown\n    Return type is \"Option | None\"\nclick.core.Option.default\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:2777:22 - error: Type is missing type annotation and could be inferred differently by type checkers\n    Inferred type is \"tuple[()]\"\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:2777:22 - error: Type is missing type annotation and could be inferred differently by type checkers\n    Inferred type is \"bool\"\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:2777:22 - error: Type is missing type annotation and could be inferred differently by type checkers\n    Inferred type is \"Any\"\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:2777:22 - error: Type is missing type annotation and could be inferred differently by type checkers\n    Inferred type is \"int\"\nclick.core.Option.type\n  /Users/adam/Documents/repositories/doccmd/.venv/lib/python3.12/site-packages/click/core.py:2775:22 - error: Ambiguous base class override\n    Type inferred in child class is \"BoolParamType | ParamType | IntRange\"\n\nSymbols exported by \"doccmd\": 2\n  With known type: 1\n  With ambiguous type: 1\n  With unknown type: 0\n\nOther symbols referenced but not exported by \"doccmd\": 225\n  With known type: 220\n  With ambiguous type: 5\n  With unknown type: 0\n\nSymbols without documentation:\n  Functions without docstring: 16\n  Functions without default param: 0\n  Classes without docstring: 5\n\nType completeness score: 50%\n```\n\nWould you be open to PRs from me which add type hints which address these?",
+    "expected_files": [
+      "src/click/core.py"
+    ],
+    "description": "Patch should address: `pyright --verifytypes` reports incomplete coverage"
+  },
+  {
+    "repo": "pallets/click",
+    "issue_number": 3458,
+    "issue_url": "https://github.com/pallets/click/issues/3458",
+    "issue_title": "`get_parameter_source()` returns `None` in 8.4.0",
+    "issue_body": "Starting with 8.4, get_parameter_source() returns None.\n\nRepro:\n\n```python\nimport click\n\nclass Source(click.ParamType):\n    name = \"source\"\n    def convert(self, value, param, ctx):\n        return {'value': value, 'source': ctx.get_parameter_source(param.name)}\n\n@click.command\n@click.option('--default', type=Source(), default='/tmp/file')\n@click.option('--nodefault', type=Source())\ndef main(default, nodefault):\n    print(\"default:\", default)\n    print(\"nodefault:\", nodefault)\n\nif __name__ == '__main__':\n    main()\n```\n\nOutput:\n\n```console\n$ pip install click==8.4.0 -q\n$ python source.py                  \ndefault: {'value': '/tmp/file', 'source': None}\nnodefault: None\n$ python source.py --default cli --nodefault cli\ndefault: {'value': 'cli', 'source': None}\nnodefault: {'value': 'cli', 'source': None}\n\n$ pip install click==8.3.3 -q                   \n$ python source.py                              \ndefault: {'value': '/tmp/file', 'source': <ParameterSource.DEFAULT: 5>}\nnodefault: None\n$ python source.py --default cli --nodefault cli\ndefault: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}\nnodefault: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}\n```\n\nEnvironment:\n\n- Python version: 3.14.4 (seems to happen on all versions, on both macOS and Linux)\n- Click version: 8.4.0",
+    "expected_files": [
+      "src/click/core.py"
+    ],
+    "description": "Patch should address: `get_parameter_source()` returns `None` in 8.4.0"
+  },
+  {
+    "repo": "pallets/jinja",
+    "issue_number": 1637,
+    "issue_url": "https://github.com/pallets/jinja/issues/1637",
+    "issue_title": "Template filename on Windows may have `altsep`",
+    "issue_body": "#1621 fixed an issue with template names that look like special Windows paths by always using `posixpath.join` on the path parts. However, this made the final name have a mix of `os.sep` and `os.altsep`, which might mess up textual comparisons. After safely joining the path, it should be normalized again with `os.path.normpath`.",
+    "expected_files": [
+      "nbconvert/exporters/html.py",
+      "nbconvert/filters/ansi.py",
+      "setup.py"
+    ],
+    "description": "Patch should address: Template filename on Windows may have `altsep`"
+  },
+  {
+    "repo": "pallets/jinja",
+    "issue_number": 1400,
+    "issue_url": "https://github.com/pallets/jinja/issues/1400",
+    "issue_title": "`Markup.__init__` causes error",
+    "issue_body": "I obviously don't expect you to debug my `--pre` CI runs, but what I read points to recent Jinja 3.0.0rc1 / markupsafe 2.0.0rc2 prereleases. Please see: https://github.com/kernc/backtesting.py/runs/2371946706?check_suite_focus=true#step:11:234\r\n\r\nThe error:\r\n```\r\nTypeError: object.__init__() takes exactly one argument (the instance to initialize)\r\n```\r\nissued here: https://github.com/pallets/jinja/blob/d77a91b1cba05d9dc78d4b03d312fcff3ca91ebb/src/jinja2/utils.py#L843\r\nseems to indicate `markupsafe.Markup` for some reason is `object` rather than `str`. :confused: \r\n<!--\r\nThis issue tracker is a tool to address bugs in Markupsafe itself.\r\nPlease use Pallets Discord or Stack Overflow for questions about your\r\nown code.\r\n\r\nReplace this comment with a clear outline of what the bug is.\r\n-->\r\n\r\n<!--\r\nDescribe how to replicate the bug.\r\n\r\nInclude a minimal reproducible example that demonstrates the bug.\r\nInclude the full traceback if there was an exception.\r\n-->\r\n\r\n<!--\r\nDescribe the expected behavior that should have happened but didn't.\r\n-->\r\n\r\nEnvironment:\r\n\r\n- Python version: 3.8\r\n- MarkupSafe version: 2.0.0rc2",
+    "expected_files": [
+      "src/jinja2/utils.py"
+    ],
+    "description": "Patch should address: `Markup.__init__` causes error"
+  },
+  {
+    "repo": "pallets/jinja",
+    "issue_number": 1198,
+    "issue_url": "https://github.com/pallets/jinja/issues/1198",
+    "issue_title": "TypeError: argument of type 'StrictUndefined' is not iterable when callin `value in dict` with missing key",
+    "issue_body": "## Expected Behavior\r\nraising of UndefinedError with text message ```'dict object' has no attribute 'missing_key'```\r\n\r\n## Actual Behavior\r\nTypeError with text ```argument of type 'StrictUndefined' is not iterable``` is raised\r\n\r\n## Template Code\r\n```jinja\r\n{% if 'value' in data['missing_key'] %}{% endif %}\r\n{{ 'value' in data['missing_key'] }}\r\n```\r\n\r\n## MCVE\r\n```python\r\n#!/usr/bin/env python3\r\nimport jinja2\r\n\r\ndef main():\r\n    text = '''{{ 'value' in data['missing_key'] }}'''  # both fails\r\n    text = '''{% if 'value' in data['missing_key'] %}{% endif %}'''\r\n\r\n    environment = jinja2.Environment(\r\n        undefined=jinja2.StrictUndefined,\r\n    )\r\n    template = environment.from_string(text)\r\n    template.render(data={})\r\n\r\nif __name__ == '__main__':\r\n    main()\r\n```\r\n\r\n## Full Traceback\r\n```pytb\r\nTraceback (most recent call last):\r\n  File \"./mcve.py\", line 16, in <module>\r\n    main()\r\n  File \"./mcve.py\", line 12, in main\r\n    template.render(data={})\r\n  File \"/usr/local/lib/python3.6/dist-packages/jinja2/environment.py\", line 1090, in render\r\n    self.environment.handle_exception()\r\n  File \"/usr/local/lib/python3.6/dist-packages/jinja2/environment.py\", line 832, in handle_exception\r\n    reraise(*rewrite_traceback_stack(source=source))\r\n  File \"/usr/local/lib/python3.6/dist-packages/jinja2/_compat.py\", line 28, in reraise\r\n    raise value.with_traceback(tb)\r\n  File \"<template>\", line 1, in top-level template code\r\nTypeError: argument of type 'StrictUndefined' is not iterable\r\n```\r\n\r\n## Your Environment\r\n* Python version: 3.6.8 (default, Jan 14 2019, 11:02:34) [GCC 8.0.1 20180414 (experimental) [trunk revision 259383]]\r\n* Jinja version: 2.11.2\r\n* OS version: Ubuntu 18.04.2 LTS\r\n\r\nHere i try to check some variants of errors for different templates: https://github.com/HumanUser/jinja2_strict_undefined\r\nAnother thing i noticed that DebugUndefined is not really debug in some cases.",
+    "expected_files": [
+      "src/jinja2/runtime.py"
+    ],
+    "description": "Patch should address: TypeError: argument of type 'StrictUndefined' is not iterable when callin `value in dict` with missing key"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 2364,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/2364",
+    "issue_title": "`ResponseCacheControl.s_maxage` raises error when set to an int",
+    "issue_body": "`Response().cache_control.s_maxage` errors with `None` is not callable\r\n\r\n```\r\nfrom werkzeug.datastructures import ResponseCacheControl\r\n\r\ncc = ResponseCacheControl()\r\ncc.s_maxage = 1\r\n\r\n---------------------------------------------------------------------------\r\nTypeError                                 Traceback (most recent call last)\r\nInput In [13], in <cell line: 1>()\r\n----> 1 cc.s_maxage = 1\r\n\r\nFile /usr/local/lib/python3.10/site-packages/werkzeug/datastructures.py:1958, in cache_control_property.<locals>.<lambda>(x, v)\r\n   1949 def cache_control_property(key, empty, type):\r\n   1950     \"\"\"Return a new property object for a cache header. Useful if you\r\n   1951     want to add support for a cache extension in a subclass.\r\n   1952 \r\n   1953     .. versionchanged:: 2.0\r\n   1954         Renamed from ``cache_property``.\r\n   1955     \"\"\"\r\n   1956     return property(\r\n   1957         lambda x: x._get_cache_value(key, empty, type),\r\n-> 1958         lambda x, v: x._set_cache_value(key, v, type),\r\n   1959         lambda x: x._del_cache_value(key),\r\n   1960         f\"accessor for {key!r}\",\r\n   1961     )\r\n\r\nFile /usr/local/lib/python3.10/site-packages/werkzeug/datastructures.py:2039, in _CacheControl._set_cache_value(self, key, value, type)\r\n   2037     self[key] = None\r\n   2038 else:\r\n-> 2039     self[key] = type(value)\r\n\r\nTypeError: 'NoneType' object is not callable\r\n```\r\n\r\n2.0.3 is OK\r\n\r\n\r\nFlask use case\r\n```\r\nfrom flask import Response\r\n\r\nresponse = Response()\r\nresponse.cache_control.s_maxage = 1\r\n```\r\n\r\nEnvironment:\r\n\r\n- Python version: 3.10.4\r\n- Werkzeug version: 2.1.0",
+    "expected_files": [
+      "src/werkzeug/datastructures.py"
+    ],
+    "description": "Patch should address: `ResponseCacheControl.s_maxage` raises error when set to an int"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 2262,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/2262",
+    "issue_title": "X-Forwarded-For Proxy Fix - does not work with IPv6 Addresses",
+    "issue_body": "X-Forwarded-For Proxy Fix does a ```host.split(\":\", 1)```[1]. This does not work with IPv6 addresses using ```:``` separator.\r\nFor example splitting ```[fd00', 'fd00:fd00:0000::2]:13050/``` would result in: ```['[fd00', 'fd00:fd00:0000::2]:13050/']``` and ```host``` is incorrectly set to ```[fd00'``` i.e only the first hextet of the IPv6 address.\r\n\r\n[1] https://github.com/pallets/werkzeug/blob/main/src/werkzeug/middleware/proxy_fix.py#L176\r\n\r\nEnvironment:\r\n\r\n- Python version: Python 3.6.8\r\n- Werkzeug version: python3-werkzeug-2.0.1-2.el8.noarch",
+    "expected_files": [
+      "src/werkzeug/middleware/proxy_fix.py"
+    ],
+    "description": "Patch should address: X-Forwarded-For Proxy Fix - does not work with IPv6 Addresses"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 2021,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/2021",
+    "issue_title": "werkzeug.serving.DechunkedInput.read returns more than what was asked for",
+    "issue_body": "I believe this is a bug in werkzeug 1.0.1 and not Flask because the error is produced by `request.stream.read()`, which is a `werkzeug.serving.DechunkedInput` instance. Please let me know if this actually belongs to Flask, and I will report it there instead. Note that I have used Flask in these examples for simplicity and because this is where I first found the issue.\r\n\r\nWith Python 3.9 on Windows 10, given the following Flask app (`pip install flask==1.1.2`) as `server.py`:\r\n\r\n```python\r\nfrom flask import Flask, request\r\n\r\nSIZE = 320000\r\napp = Flask('bug')\r\n\r\n@app.route('/bug', methods=['POST'])\r\ndef bug():\r\n    chunk = request.stream.read(SIZE)\r\n    if len(chunk) > SIZE:\r\n        raise ValueError(f'bug in {type(request.stream)}; read({SIZE}) returned {len(chunk)} bytes')\r\n\r\n    return 'ok'\r\n\r\nif __name__ == \"__main__\":\r\n    app.run()\r\n```\r\n\r\nAnd the following `client.py` file (`pip install aiohttp==3.7.3`):\r\n\r\n```python\r\nimport asyncio\r\nimport aiohttp\r\n\r\nURL = 'http://localhost:5000/bug'\r\nEXTRA = 44\r\nCHUNK = 4000\r\nDELAY = 0.125\r\n\r\nasync def req():\r\n    yield bytes(EXTRA)\r\n    while True:\r\n        yield bytes(CHUNK)\r\n        await asyncio.sleep(DELAY)\r\n\r\nasync def main():\r\n    async with aiohttp.ClientSession() as session:\r\n        async with session.post(URL, data=req()) as resp:\r\n            async for line in resp.content:\r\n                print(line)\r\n\r\nasyncio.run(main())\r\n```\r\n\r\nRunning `python server.py` followed by `python client.py` in another terminal will eventually lead to the following error:\r\n\r\n```\r\n[2021-01-27 16:20:20,419] ERROR in app: Exception on /bug [POST]\r\nTraceback (most recent call last):\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\app.py\", line 2447, in wsgi_app\r\n    response = self.full_dispatch_request()\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\app.py\", line 1952, in full_dispatch_request\r\n    rv = self.handle_user_exception(e)\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\app.py\", line 1821, in handle_user_exception\r\n    reraise(exc_type, exc_value, tb)\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\_compat.py\", line 39, in reraise\r\n    raise value\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\app.py\", line 1950, in full_dispatch_request\r\n    rv = self.dispatch_request()\r\n  File \"C:\\Python39\\lib\\site-packages\\flask\\app.py\", line 1936, in dispatch_request\r\n    return self.view_functions[rule.endpoint](**req.view_args)\r\n  File \"C:\\server.py\", line 10, in bug\r\n    raise ValueError(f'bug in {type(request.stream)}; read({SIZE}) returned {len(chunk)} bytes')\r\nValueError: bug in <class 'werkzeug.serving.DechunkedInput'>; read(320000) returned 320044 bytes\r\n```\r\n\r\nI expected `read` to never return more than `size`, but it did. According to [PEP 3333 - Input and Error Streams](https://www.python.org/dev/peps/pep-3333/#input-and-error-streams), `read` is defined on the `input` stream with as follows (strong emphasis mine):\r\n\r\n> **The semantics of each method are as documented in the Python Library Reference**, except for these ",
+    "expected_files": [
+      "src/werkzeug/serving.py"
+    ],
+    "description": "Patch should address: werkzeug.serving.DechunkedInput.read returns more than what was asked for"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 1971,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/1971",
+    "issue_title": "User agents not being detected",
+    "issue_body": "While using your utility to parse user agents for calls to my site, I have a few that don't get parsed correctly:\r\n\r\nVersion not getting parsed on the following user agents:\r\n\r\n* `Mozilla/5.0 (Linux; Android 10; motorola edge) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.101 Mobile Safari/537.36`\r\n* `Mozilla/5.0 (Linux; Android 10; motorola edge) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.81 Mobile Safari/537.36`\r\n* `Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Trident/4.0; .NET CLR 1.1.4322)`\r\n\r\nDetected as 'mozilla' but is actually msie v11:\r\n\r\n* `Mozilla/5.0 (Windows NT 6.3; WOW64; Trident/7.0; rv:11.0) like Gecko`",
+    "expected_files": [
+      "src/werkzeug/useragents.py"
+    ],
+    "description": "Patch should address: User agents not being detected"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 875,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/875",
+    "issue_title": "werkzeug.formparser is really slow with large binary uploads",
+    "issue_body": "When I perform a `multipart/form-data` upload of any large binary file in Flask, those uploads are very easily CPU bound (with Python consuming 100% CPU) instead of I/O bound on any reasonably fast network connection.\n\nA little bit of CPU profiling reveals that almost all CPU time during these uploads is spent in `werkzeug.formparser.MultiPartParser.parse_parts()`. The reason this that the method `parse_lines()` yields _a lot_ of very small chunks, sometimes [even just single bytes](https://github.com/mitsuhiko/werkzeug/blob/master/werkzeug/formparser.py#L439):\n\n``` python\n# we have something in the buffer from the last iteration.\n# this is usually a newline delimiter.\nif buf:\n    yield _cont, buf\n    buf = b''\n```\n\nSo `parse_parts()` goes through a lot of small iterations (more than 2 million for a 100 MB file) processing single \"lines\", always writing just very short chunks or even single bytes into the output stream. This adds a lot of overhead slowing down those whole process and making it CPU bound very quickly.\n\nA quick test shows that a speed-up is very easily possible by first collecting the data in a `bytearray` in `parse_lines()` and only yielding that data back into `parse_parts()` when `self.buffer_size` is exceeded. Something like this:\n\n``` python\nbuf = b''\ncollect = bytearray()\nfor line in iterator:\n    if not line:\n        self.fail('unexpected end of stream')\n\n    if line[:2] == b'--':\n        terminator = line.rstrip()\n        if terminator in (next_part, last_part):\n            # yield remaining collected data\n            if collect:\n                yield _cont, collect\n            break\n\n    if transfer_encoding is not None:\n        if transfer_encoding == 'base64':\n            transfer_encoding = 'base64_codec'\n        try:\n            line = codecs.decode(line, transfer_encoding)\n        except Exception:\n            self.fail('could not decode transfer encoded chunk')\n\n    # we have something in the buffer from the last iteration.\n    # this is usually a newline delimiter.\n    if buf:\n        collect += buf\n        buf = b''\n\n    # If the line ends with windows CRLF we write everything except\n    # the last two bytes.  In all other cases however we write\n    # everything except the last byte.  If it was a newline, that's\n    # fine, otherwise it does not matter because we will write it\n    # the next iteration.  this ensures we do not write the\n    # final newline into the stream.  That way we do not have to\n    # truncate the stream.  However we do have to make sure that\n    # if something else than a newline is in there we write it\n    # out.\n    if line[-2:] == b'\\r\\n':\n        buf = b'\\r\\n'\n        cutoff = -2\n    else:\n        buf = line[-1:]\n        cutoff = -1\n\n    collect += line[:cutoff]\n\n    if len(collect) >= self.buffer_size:\n        yield _cont, collect\n        collect.clear()\n```\n\nThis change alone reduces the upload time for my 34 MB test file from 4200 ms to around 1100 ms over localhost on my machine, that'",
+    "expected_files": [
+      "setup.py",
+      "src/werkzeug/_internal.py",
+      "src/werkzeug/formparser.py",
+      "src/werkzeug/sansio/multipart.py"
+    ],
+    "description": "Patch should address: werkzeug.formparser is really slow with large binary uploads"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 1937,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/1937",
+    "issue_title": "range request on empty file should return 200 instead of 416",
+    "issue_body": "When attempting to access any range on an empty file, Werkzeug returns a `416 Requested Range Not Satisfiable` error. Whilst this is perhaps reasonable, it is inconsistent with behaviour for non-empty files. For example, the range `bytes=0-999999` on a small file, say 10 bytes in length, will succeed with a `Content-Range: bytes 0-9/10` response header.\r\n\r\nThe issue is that `Content-Range` is inclusive, and so ostensibly the only way to succeed for an empty file would be to return the (invalid) response header `Content-Range: bytes 0--1/0`. As such, Werkzeug's behaviour is technically correct with respect to the specification, but I would argue it is undesirable/unexpected.\r\n\r\nTwo potential alternative approaches are:\r\n\r\n1. Respond with `Content-Range: bytes */0` to indicate an unknown range.\r\n2. 'Ignore' the range request in this case and return `200 OK`.\r\n\r\nUsing `curl -ir 0-0` against an empty file shows that different servers take different approaches. For `sourtin.github.io/empty.txt`, it gives a `416` error but responds with `bytes */0`, whereas for `Apache/2.4.18` it gives `200 OK` and ignores the range (i.e. approach 2).\r\n\r\nAdding a special case is in its own way undesirable, but if either approach is acceptable I'm happy to submit an appropriate PR. I'd lean towards approach 2, personally.",
+    "expected_files": [
+      "src/werkzeug/wrappers/response.py"
+    ],
+    "description": "Patch should address: range request on empty file should return 200 instead of 416"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "issue_number": 1832,
+    "issue_url": "https://github.com/pallets/werkzeug/issues/1832",
+    "issue_title": "Fails to color Windows console",
+    "issue_body": "On windows the new Flask prints weird characters on console, instead of coloring the line as on linux. eg: \"\u2190[37m\r\n\r\nI would rather go black/white (like in previous version) if coloring doesnt work.\r\n\r\n2020-05-03 14:05:47,398 - INFO - 127.0.0.1 - - [03/May/2020 14:05:47] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n2020-05-03 14:06:42,922 - INFO - 127.0.0.1 - - [03/May/2020 14:06:42] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n2020-05-03 14:07:24,007 - INFO - 127.0.0.1 - - [03/May/2020 14:07:24] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n2020-05-03 14:07:24,210 - INFO - 127.0.0.1 - - [03/May/2020 14:07:24] \"\u2190[37mGET /static/images/favicon.ico HTT\r\n2020-05-03 14:08:19,539 - INFO - 127.0.0.1 - - [03/May/2020 14:08:19] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n2020-05-03 14:09:15,065 - INFO - 127.0.0.1 - - [03/May/2020 14:09:15] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n2020-05-03 14:10:10,579 - INFO - 127.0.0.1 - - [03/May/2020 14:10:10] \"\u2190[37mGET /result HTTP/1.1\u2190[0m\" 200 -\r\n\r\nEnv:\r\nFlask==1.1.2\r\nWin7 x64\r\nPython 3.6.7 x64\r\nWerkzeug==1.0.1",
+    "expected_files": [
+      "src/werkzeug/_internal.py",
+      "src/werkzeug/serving.py"
+    ],
+    "description": "Patch should address: Fails to color Windows console"
   }
 ]

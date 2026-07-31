@@ -208,25 +208,79 @@ class AgentOrchestrator:
         Returns:
             List of search result items.
         """
-        keywords = self._extract_keywords(issue_text)
-        query = f"repo:{owner}/{repo} {keywords}"
+        ident_terms = self._extract_identifiers(issue_text)
+        results: list[dict[str, Any]] = []
+        seen: set[str] = set()
 
-        self._check_budget(state)
-        results = self.github.search_code(query, per_page=10)
+        # Strategy 1 (primary): one query per extracted code identifier.
+        # Code search ANDs multiple terms, so a single honest identifier per
+        # query is what reliably lexically matches source. Merge + dedupe.
+        for term in ident_terms:
+            for item in self._search_github(state, f"repo:{owner}/{repo} {term}"):
+                path = item.get("path", "")
+                if path not in seen:
+                    seen.add(path)
+                    results.append(item)
+            if len(results) >= 3:
+                break  # enough candidates; save remaining budget for reads
 
-        # If too few results, retry with broader query
-        if len(results) < 3:
-            broader = " ".join(issue_text.split()[:8])
-            query = f"repo:{owner}/{repo} {broader}"
-            self._check_budget(state)
-            broader_results = self.github.search_code(query, per_page=10)
-            # Merge without duplicates
-            seen = {r.get("path", "") for r in results}
-            for r in broader_results:
-                if r.get("path", "") not in seen:
-                    results.append(r)
+        # Strategy 2 (fallback): the raw keyword query, only if identifiers
+        # surfaced nothing usable (e.g. a genuinely vague report with no named
+        # symbol). Preserved from the original loop for the hard-case path.
+        if len(results) < 1:
+            keywords = self._extract_keywords(issue_text)
+            for item in self._search_github(state, f"repo:{owner}/{repo} {keywords}"):
+                path = item.get("path", "")
+                if path not in seen:
+                    seen.add(path)
+                    results.append(item)
 
-        return results
+        return self._rank_candidates(results)
+
+    # File names / dirs that are documentation or metadata, not patchable
+    # code. Keyword search frequently surfaces these and, if ranked first,
+    # they crowd out the actual source file (PRD §6.2 edge case: too many /
+    # noisy results must be filtered, not all read).
+    _NOISE_FILENAMES = (
+        "changes", "changelog", "history", "news", "authors",
+        "contributors", "license", "readme", "contributing", "codeofconduct",
+    )
+    _NOISE_DIRS = ("docs/", "doc/", ".github/", "examples/", "example/")
+
+    def _rank_candidates(
+        self, results: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Drop doc/metadata matches and rank source files above the rest.
+
+        Returns the filtered list with patchable source files first, then any
+        other (non-noise) files as secondary context.
+        """
+        source: list[dict[str, Any]] = []
+        other: list[dict[str, Any]] = []
+        for item in results:
+            path = item.get("path", "")
+            lower = path.lower()
+            base = lower.rsplit("/", 1)[-1]
+            stem = base.split(".")[0]
+            if stem in self._NOISE_FILENAMES or lower.endswith(
+                (".md", ".rst", ".txt")
+            ) or any(lower.startswith(d) for d in self._NOISE_DIRS):
+                continue  # documentation/metadata — not a patch target
+            # Tests are reference material, not patch targets; reading them
+            # burns the LLM's token budget without producing an applyable
+            # diff. Drop them from candidates.
+            if (
+                base.startswith("test_")
+                or base.endswith("_test.py")
+                or "/tests/" in lower
+                or lower.startswith(("tests/", "test/"))
+            ):
+                continue
+            if lower.endswith(".py"):
+                source.append(item)
+            else:
+                other.append(item)
+        return source + other
 
     def _extract_keywords(self, issue_text: str) -> str:
         """Extract search keywords from issue text.
@@ -335,6 +389,59 @@ class AgentOrchestrator:
         ]
         return " ".join(keywords[:10])
 
+    # A code identifier must contain at least one underscore or uppercase
+    # letter — plain lowercase words are prose, not symbol names, and the
+    # code search lexer AND-combines them so adding prose kills precision.
+    _IDENT_RE = re.compile(r"\b(?=[\w()]*[_A-Z])([\w.]+\(\)|[\w.]+)\b")
+
+    def _extract_identifiers(self, issue_text: str, limit: int = 3) -> list[str]:
+        """Extract search terms that name actual code symbols.
+
+        GitHub code search is a lexical matcher: it finds a term only if that
+        exact (sub-)string appears in a file. Bug prose ("the usage line is not
+        printed") almost never lexically matches code, so raw keyword queries
+        return noise (CHANGES.md) or nothing. Code identifiers from the report
+        — backticked names, ``snake_case`` / ``CamelCase`` symbols, dotted
+        paths — are the terms that actually lexically match. Extracted in
+        order of decreasing signal: longer and more structured names first.
+
+        Args:
+            issue_text: The raw issue/bug description.
+            limit: Maximum number of identifiers to return.
+
+        Returns:
+            Up to ``limit`` identifier strings, deduplicated, best first.
+        """
+        candidates: list[str] = []
+        # 1) backticked spans are the highest-signal source of exact symbols
+        for span in re.findall(r"`([^`]+)`", issue_text):
+            candidates.extend(re.split(r"[^\w.()]+", span))
+        # 2) snake_case, CamelCase, and dotted identifiers in prose
+        candidates.extend(self._IDENT_RE.findall(issue_text))
+
+        seen: set[str] = set()
+        idents: list[str] = []
+        for raw in candidates:
+            term = raw.strip("()")
+            # keep only tokens that carry code structure; skip short/common
+            if len(term) < 4 or not re.search(r"[_./A-Z]", term):
+                continue
+            term = term.split(".")[-1] or term  # dotted path -> leaf symbol
+            if len(term) < 4 or term.lower() in seen:
+                continue
+            seen.add(term.lower())
+            idents.append(term)
+        # Most signal first: prefer longer, then snake/camel over TitleCase words
+        idents.sort(key=lambda t: (len(t), "_" in t), reverse=True)
+        return idents[:limit]
+
+    def _search_github(
+        self, state: RunState, query: str
+    ) -> list[dict[str, Any]]:
+        """Run a code search, tracked against the budget."""
+        self._check_budget(state)
+        return self.github.search_code(query, per_page=10)
+
     def _read_and_parse_phase(
         self,
         state: RunState,
@@ -354,6 +461,9 @@ class AgentOrchestrator:
             List of parsed FileStructure objects.
         """
         file_structures: list[FileStructure] = []
+        # Read the top ranked source candidates within budget. Five balances
+        # recall (the real fix may span several files) against the LLM's
+        # per-request token budget — more files means each gets less room.
         for item in candidates[:5]:
             path = item.get("path", "")
 
