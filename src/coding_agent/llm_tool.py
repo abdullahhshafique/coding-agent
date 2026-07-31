@@ -93,8 +93,13 @@ class LLMTool:
             + "\n"
             + "</file_contexts>"
             + "\n\n"
-            + "Generate a unified diff patch. After the diff, "
-            + "add a line RATIONALE: followed by your explanation."
+            + "Generate a unified diff patch. CRITICAL: every context line "
+            + "(leading space) and removed line (leading -) in the diff must "
+            + "be copied EXACTLY, character-for-character, from the file "
+            + "content above — including leading whitespace. Do NOT prepend "
+            + "line numbers or any other prefix to copied lines. Use standard "
+            + "---/+++ file headers and @@ hunk markers. After the diff, add a "
+            + "line RATIONALE: followed by your explanation."
         )
 
         diff_text, rationale = self._call(
@@ -312,7 +317,7 @@ class LLMTool:
             body = self._select_content(content, functions, classes,
                                         issue_tokens)
             if body:
-                part += "  Content (line-numbered):\n" + body + "\n"
+                part += "  Content:\n" + body + "\n"
             parts.append(part)
 
         return ("\n" + "---" + "\n").join(parts)
@@ -322,12 +327,6 @@ class LLMTool:
         """Lowercased symbol-ish tokens from the issue for relevance matching."""
         tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", issue_text))
         return {t.lower() for t in tokens}
-
-    @staticmethod
-    def _show(lines: list[str], start: int, end: int) -> list[str]:
-        """Render original lines [start..end] (1-based, inclusive) with a
-        `NNNN| ` prefix so the model sees accurate line numbers for diffs."""
-        return [f"{i:4}| {lines[i - 1]}" for i in range(start, end + 1)]
 
     def _select_content(
         self,
@@ -343,14 +342,14 @@ class LLMTool:
             return ""
         lines = content.splitlines()
 
-        # Small file: show whole with line numbers.
+        # Small file: show it whole (no truncation marker needed).
         if len(content) <= self._FILE_CONTENT_BUDGET:
-            return "\n".join(self._show(lines, 1, len(lines)))
+            return content
 
         merged = self._relevant_ranges(functions, classes, issue_tokens)
         if not merged:
-            # No relevant symbol — show the file head with line numbers.
-            return "\n".join(self._show(lines, 1, min(len(lines), 60)))
+            # No relevant symbol — show the file head.
+            return "\n".join(lines[:60])
 
         return self._render_ranges(lines, merged)
 
@@ -385,7 +384,7 @@ class LLMTool:
         for s, e in merged:
             if s > cursor:
                 out.append(f"# ... [{s - cursor} lines omitted]")
-            block = self._show(lines, s, e)
+            block = lines[s - 1 : e]
             cost = sum(len(b) + 1 for b in block)
             if used + cost > self._FILE_CONTENT_BUDGET:
                 break
