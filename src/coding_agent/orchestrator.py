@@ -60,9 +60,23 @@ class AgentOrchestrator:
                 state, f"Repository {request.repo} not found"
             )
         except CodingAgentError as exc:
+            # Every typed error in this project's own hierarchy (Rules.md
+            # §5) represents a case where the agent correctly determined
+            # it cannot proceed confidently -- a designed stopping
+            # condition, not a system failure. Route all of them to the
+            # insufficient-context path.
             return self._insufficient_context(state, str(exc))
         except Exception as exc:
-            return self._insufficient_context(state, f"Unexpected error: {exc}")
+            # Anything that reaches here is, by construction, NOT one of
+            # this project's typed errors -- Rules.md §5 requires every
+            # tool to raise a typed CodingAgentError subclass, so an
+            # untyped exception surfacing here means something broke that
+            # the typed-error contract didn't anticipate (a bug, an
+            # unhandled library exception, etc.), not a graceful stop.
+            # This is status="error", distinct from "insufficient_context",
+            # so Evaluator's failed_patches count (PRD §4) actually means
+            # something.
+            return self._system_failure(state, f"Unexpected error: {exc}")
 
     def _execute_run(self, state: RunState) -> RunResult:
         """Core loop execution after initialization.
@@ -152,6 +166,10 @@ class AgentOrchestrator:
     def _resolve_issue_text(self, request: RunRequest, owner: str, repo: str) -> str:
         """Resolve issue text from URL or raw text.
 
+        Per PRD §6.1: if both an issue URL and raw text are given, the URL
+        text takes precedence and the raw text is kept as supplementary
+        context appended after it -- not discarded.
+
         Args:
             request: The run request.
             owner: Repository owner.
@@ -164,7 +182,16 @@ class AgentOrchestrator:
             match = re.search(r"/issues/(\d+)", request.issue_url)
             if match:
                 number = int(match.group(1))
-                return self.github.get_issue(owner, repo, number)
+                url_text = self.github.get_issue(owner, repo, number)
+                if request.issue_text and request.issue_text.strip():
+                    return (
+                        url_text
+                        + "\n\n"
+                        + "Additional context supplied by user:"
+                        + "\n"
+                        + request.issue_text
+                    )
+                return url_text
         return request.issue_text or ""
 
     def _search_phase(
@@ -298,9 +325,6 @@ class AgentOrchestrator:
             "its",
             "our",
             "their",
-            "in",
-            "it",
-            "its",
         }
         punctuation = ".,;:!?()[]{}\\\"'"
         words = issue_text.lower().split()
@@ -424,6 +448,10 @@ class AgentOrchestrator:
     ) -> RunResult:
         """Return an insufficient-context result.
 
+        This is the designed stopping condition (PRD §6.5): the agent
+        correctly determined it cannot proceed confidently. Distinct from
+        _system_failure(), which means something broke unexpectedly.
+
         Args:
             state: Current run state.
             reason: Explanation of why we could not proceed.
@@ -442,6 +470,46 @@ class AgentOrchestrator:
         print(sep)
         return RunResult(
             status="insufficient_context",
+            patch_path=None,
+            trace_path=trace_path,
+            rationale=None,
+            reason=reason,
+        )
+
+    def _system_failure(
+        self,
+        state: RunState,
+        reason: str,
+    ) -> RunResult:
+        """Return an error result for an unexpected, non-designed failure.
+
+        Unlike _insufficient_context() (PRD §6.5's designed stopping
+        condition), this path is reached only when an exception outside
+        this project's typed error hierarchy (Rules.md §5) surfaces --
+        i.e. something broke that the typed-error contract didn't
+        anticipate, not a case where the agent correctly declined to
+        guess. Kept as a visually distinct banner so it isn't confused
+        with the designed insufficient-context path when scanning stdout
+        or trace output.
+
+        Args:
+            state: Current run state.
+            reason: Explanation of what went wrong.
+
+        Returns:
+            RunResult with status="error".
+        """
+        trace_path = self.trace_logger.write()
+        sep = "!" * 60
+        print()
+        print(sep)
+        print("RUN FAILED (UNEXPECTED ERROR)")
+        print(sep)
+        print(f"Reason: {reason}")
+        print(f"Trace saved to: {trace_path}")
+        print(sep)
+        return RunResult(
+            status="error",
             patch_path=None,
             trace_path=trace_path,
             rationale=None,

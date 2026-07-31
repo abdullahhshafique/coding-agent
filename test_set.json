@@ -1,0 +1,11 @@
+[
+  {
+    "repo": "psf/requests",
+    "issue_number": 1648,
+    "issue_url": "https://github.com/psf/requests/issues/1648",
+    "issue_title": "Header \"Transfer-Encoding: chunked\" set even if Content-Length is provided which causes body to not actually get chunked",
+    "issue_body": "When making a request with both a body and a Content-Length header, Requests incorrectly adds Transfer-Encoding: chunked, which causes the body to not actually get chunked as expected. This breaks compatibility with servers that expect proper chunked encoding when the header is present.\n\nReproduction:\n```python\nimport requests\nimport json\n\nheaders = {'Content-Length': '13', 'Content-Type': 'application/json'}\ndata = json.dumps({'test': 'data'})\nresponse = requests.post('https://httpbin.org/post', data=data, headers=headers)\n```\n\nThe resulting request has both Content-Length and Transfer-Encoding: chunked, which is invalid per HTTP/1.1 specifications (RFC 7230 Section 3.3.2).",
+    "expected_files": ["requests/models.py", "requests/sessions.py", "requests/adapters.py"],
+    "description": "Prevent setting Transfer-Encoding: chunked when Content-Length is explicitly provided"
+  }
+]

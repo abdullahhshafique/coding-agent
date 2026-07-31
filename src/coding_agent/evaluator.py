@@ -11,7 +11,7 @@ from coding_agent.models import RunResult
 
 
 @dataclass
-class TestCase:
+class EvalCase:
     """A single test case from a real GitHub issue."""
 
     repo: str
@@ -27,7 +27,7 @@ class TestCase:
 class EvaluationRecord:
     """Result of running the agent against one test case."""
 
-    test_case: TestCase
+    test_case: EvalCase
     run_result: RunResult
     patch_correct: bool | None
     files_found: list[str]
@@ -64,22 +64,22 @@ class Evaluator:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def load_test_set(self, path: str) -> list[TestCase]:
+    def load_test_set(self, path: str) -> list[EvalCase]:
         """Load test cases from a JSON file.
 
         Args:
             path: Path to JSON file containing test cases.
 
         Returns:
-            List of TestCase objects.
+            List of EvalCase objects.
         """
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return [TestCase(**item) for item in data]
+        return [EvalCase(**item) for item in data]
 
     def compute_metrics(
         self,
-        test_case: TestCase,
+        test_case: EvalCase,
         run_result: RunResult,
         files_found: list[str],
         tool_calls_used: int,

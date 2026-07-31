@@ -20,7 +20,7 @@ def main() -> int:
     fix_parser = subparsers.add_parser("fix", help="Generate a patch for an issue")
     fix_parser.add_argument(
         "--repo",
-        required=True,
+        default=None,
         help="Repository identifier, e.g. owner/name or GitHub URL",
     )
     fix_parser.add_argument(
@@ -44,6 +44,11 @@ def main() -> int:
 
     if args.command != "fix":
         parser.print_help()
+        return 1
+
+    if not args.repo:
+        print("Error: --repo is required.", file=sys.stderr)
+        fix_parser.print_help()
         return 1
 
     if not args.issue and not args.issue_url:

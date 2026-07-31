@@ -178,10 +178,10 @@ A more detailed sequence diagram lives in `Architecture.md` §4 (Data Flow).
 
 | # | Question | Owner | Needed by |
 |---|----------|-------|-----------|
-| 1 | Which specific Groq-hosted model (e.g. Llama 3.3 70B vs. a smaller/faster variant) balances patch quality vs. speed for this loop? | Abdullah | Before Phase 1 generation-phase implementation |
+| 1 | ~~Which specific Groq-hosted model...~~ **RESOLVED:** `llama-3.3-70b-versatile`, implemented in `LLMTool.MODEL`. Not benchmarked against a smaller/faster variant — chosen as a starting point. Revisit if Phase 3's tool-call-efficiency or task-completion numbers suggest a smaller model performs comparably at lower latency. | Abdullah | Resolved |
 | 2 | Is GitHub's code search API sufficient, or does the fallback (shallow clone + local scan) need to be built as part of v1 rather than a later phase? | Abdullah | Before Phase 1 search-phase implementation |
 | 3 | What's the actual curated test set of ~15–20 closed GitHub issues used to measure Task Completion Rate — which repos, how selected? | Abdullah | Before Phase 3 (evaluation) |
-| 4 | Should the tool-call budget be a single global cap, or split into sub-budgets per phase (e.g. max 8 for search, max 10 for read)? | Abdullah | Before Phase 1 |
+| 4 | ~~Should the tool-call budget be a single global cap, or split into sub-budgets per phase?~~ **RESOLVED:** single global cap, implemented in `RunState.remaining_budget` / `AgentOrchestrator._check_budget`. No per-phase sub-budgets in v1. | Abdullah | Resolved |
 
 ---
 

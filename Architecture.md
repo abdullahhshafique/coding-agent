@@ -126,6 +126,17 @@ class RunResult:
     reason: str | None         # populated on non-success
 ```
 
+**Status semantics:** `"insufficient_context"` is the designed stopping
+condition (PRD §6.5) — every typed error in this project's own exception
+hierarchy (`CodingAgentError` and its subclasses, per Rules.md §5) maps
+here, since a typed error means the agent correctly determined it
+couldn't proceed confidently. `"error"` is reserved for anything
+*outside* that typed hierarchy reaching the orchestrator's top-level
+handler — i.e. an untyped exception the typed-error contract didn't
+anticipate. `Evaluator.summarize()`'s `failed_patches` count depends on
+this distinction actually being enforced in `AgentOrchestrator.run()`,
+not just declared here.
+
 There is no ER diagram because there is no relational data store in v1. If a future phase adds the persistent AST cache (US-13, P2), that would introduce a real schema (likely SQLite: `repo`, `file_path`, `content_hash`, `parsed_structure_json`, `cached_at`) — deferred until that phase.
 
 ---
@@ -214,9 +225,9 @@ There is no login flow, no payment flow, no data sync flow in this project — t
 ## 8. Security Architecture
 
 - **Threat model (scoped to what's realistic for this tool):**
-  - Leaking the GitHub PAT or Groq API key via logs, trace files, or error messages → **mitigation:** both are read from environment variables only; the Trace Logger explicitly redacts any string matching known key patterns before writing to `.trace.json`; keys are never included in prompts sent to the LLM.
-  - A malicious or malformed repo causing the parser to hang or crash → **mitigation:** file size threshold before parsing (PRD §6.3); parse operations run with a timeout; a single file's parse failure must not crash the whole run (fallback to tree-sitter, then to raw-text-fallback, then to skipping that file entirely).
-  - Prompt injection via file content or issue text (e.g. a file containing text designed to manipulate the LLM into ignoring its patch-generation instructions) → **mitigation:** the system prompt to the LLM Tool explicitly frames file content and issue text as *data*, not *instructions*; the orchestrator does not execute anything the LLM "asks" to do outside its defined tool contract (there is no dynamic tool the LLM can invent).
+  - Leaking the GitHub PAT or Groq API key via logs, trace files, or error messages → **mitigation:** both are read from environment variables only; `TraceLogger._redact()` pattern-matches known credential shapes (GitHub PAT formats, Groq keys, `Authorization`/`Bearer` headers) recursively through nested dicts/lists and redacts them before a record is even held in memory, not just at write-time; keys are never included in prompts sent to the LLM. Pattern-based redaction is a safety net, not a guarantee — a credential in a format not covered by `_SECRET_PATTERNS` would not be caught, so this should not be the only thing standing between a real token and a committed trace file.
+  - A malicious or malformed repo causing the parser to hang or crash → **mitigation:** file size threshold before parsing (PRD §6.3), truncation applied ahead of the LLM call; a single file's parse failure must not crash the whole run (fallback to tree-sitter, then to raw-text-fallback, then to skipping that file entirely). **Known gap:** `ast.parse()` itself still runs without a wall-clock timeout — a pathological input that hangs the parser rather than raising would stall the run rather than degrade. Not yet fixed; tracked here rather than silently left undocumented.
+  - Prompt injection via file content or issue text (e.g. a file containing text designed to manipulate the LLM into ignoring its patch-generation instructions) → **mitigation:** the system prompt to the LLM Tool explicitly frames file content and issue text as *data*, not *instructions*, and both are wrapped in `<issue_description>`/`<file_contexts>` tags so the model has a structural signal for where data ends and instructions begin; the orchestrator does not execute anything the LLM "asks" to do outside its defined tool contract (there is no dynamic tool the LLM can invent). This is a prompt-level mitigation against a model that behaves as instructed — it is not a hard guarantee against adversarial issue content on a model that doesn't reliably follow the framing. No output-side check (e.g. scanning the generated diff for signs the model was steered) exists in v1.
   - Generated patch containing something harmful if blindly applied (this is why auto-apply is P2/out of scope for v1) → **mitigation:** v1 never applies the patch automatically; it is always output for human review only.
 - **Encryption:** not applicable to data at rest (no persisted user data); all external calls (GitHub, Groq) are over HTTPS, so encryption in transit is inherited from those APIs.
 - **RBAC:** not applicable — single local user, single PAT, no multi-user access model in v1.

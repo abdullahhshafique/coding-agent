@@ -90,6 +90,13 @@ class GitHubTool:
         except requests.RequestException as exc:
             error_msg = f"GitHub request failed: {exc}"
             raise GitHubError(error_msg) from exc
+        except Exception as exc:
+            # Never let an untyped transport/connection error escape the tool:
+            # Rules.md §5 requires every failure to surface as a typed
+            # CodingAgentError so the orchestrator can route it to the
+            # designed insufficient-context path. Re-raise as GitHubError.
+            error_msg = f"GitHub request failed: {exc}"
+            raise GitHubError(error_msg) from exc
         finally:
             duration_ms = int((time.perf_counter() - start) * 1000)
             self.trace_logger.log(
