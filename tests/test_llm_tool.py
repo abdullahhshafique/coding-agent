@@ -51,10 +51,12 @@ def test_format_contexts_with_content() -> None:
                 "content": "def hello():\n    print('world')",
             }
         ]
-        result = tool._format_contexts(contexts)
+        # 'hello' and 'Greeter' are named in the issue, so the structural
+        # metadata surfaces them marked as relevant.
+        result = tool._format_contexts(contexts, "Fix hello() in Greeter")
         assert "File: src/main.py" in result
-        assert "Functions: hello" in result
-        assert "Classes: Greeter" in result
+        assert "Relevant functions: hello" in result
+        assert "Relevant classes: Greeter" in result
         assert "def hello():" in result
 
 
@@ -96,8 +98,8 @@ def test_format_contexts_targets_named_function() -> None:
             }
         ]
         result = tool._format_contexts(contexts, "Fix target() returning None")
-        # The named symbol is surfaced even though only the head fits budget.
-        assert "Functions: target (121-122)" in result
+        # The named symbol is surfaced marked as relevant.
+        assert "Relevant functions: target (121-122)" in result
 
 
 def test_strip_code_fence_removes_markdown() -> None:

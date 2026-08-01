@@ -93,13 +93,16 @@ class LLMTool:
             + "\n"
             + "</file_contexts>"
             + "\n\n"
-            + "Generate a unified diff patch. CRITICAL: every context line "
-            + "(leading space) and removed line (leading -) in the diff must "
-            + "be copied EXACTLY, character-for-character, from the file "
-            + "content above — including leading whitespace. Do NOT prepend "
-            + "line numbers or any other prefix to copied lines. Use standard "
-            + "---/+++ file headers and @@ hunk markers. After the diff, add a "
-            + "line RATIONALE: followed by your explanation."
+            + "Output ONE unified-diff hunk only (the single smallest edit "
+            + "that fixes the bug). RULES — the validator rejects the patch "
+            + "if any is broken: (1) one hunk, contiguous; (2) context "
+            + "(leading space) and removed (- ) lines must be copied "
+            + "EXACTLY, character-for-character, from the file content above "
+            + "including indentation; (3) NEVER invent a line not visible "
+            + "above; (4) no placeholder/ellipsis lines ('# ...'); (5) no "
+            + "line numbers or extra prefixes in the diff. Use ---/+++ "
+            + "headers with the exact path shown. After the diff, add a line "
+            + "RATIONALE: followed by your explanation."
         )
 
         diff_text, rationale = self._call(
@@ -190,7 +193,7 @@ class LLMTool:
                 },
                 tool_output={
                     "response_length": len(response_text),
-                    "response_preview": response_text[:200],
+                    "response_preview": response_text[:4000],
                 },
                 error=error_msg,
                 duration_ms=duration_ms,
@@ -269,10 +272,11 @@ class LLMTool:
             return match.group(1).strip()
         return text
 
-    # Per-file content budget (chars). Sized so ~5 files + the issue text stay
-    # under the model's on-demand tokens-per-minute limit while still showing
-    # the relevant function bodies.
-    _FILE_CONTENT_BUDGET = 2600
+    # Per-file content budget (chars). Sized for Groq's on-demand tier where
+    # a smaller model has a 6000-TPM request limit: 4 files x ~1400 chars of
+    # content + structural metadata + the issue description stays well under
+    # the cap while still showing the relevant function bodies.
+    _FILE_CONTENT_BUDGET = 1400
 
     def _format_contexts(
         self,
@@ -305,13 +309,19 @@ class LLMTool:
             content = ctx.get("content", "")
 
             part = f"File: {path}" + "\n"
-            if functions:
-                part += "  Functions: " + ", ".join(
-                    f"{f['name']} ({f['lines']})" for f in functions
+            # Only emit structural metadata for symbols the issue mentions;
+            # a bare name+range list of every function in a large file (e.g.
+            # click/core.py has 153) is prompt bloat with no guidance value.
+            issue_t = self._issue_identifiers(issue_text)
+            rel_funcs = [f for f in functions if f["name"].lower() in issue_t]
+            rel_classes = [c for c in classes if c["name"].lower() in issue_t]
+            if rel_funcs:
+                part += "  Relevant functions: " + ", ".join(
+                    f"{f['name']} ({f['lines']})" for f in rel_funcs
                 ) + "\n"
-            if classes:
-                part += "  Classes: " + ", ".join(
-                    f"{c['name']} ({c['lines']})" for c in classes
+            if rel_classes:
+                part += "  Relevant classes: " + ", ".join(
+                    f"{c['name']} ({c['lines']})" for c in rel_classes
                 ) + "\n"
 
             body = self._select_content(content, functions, classes,

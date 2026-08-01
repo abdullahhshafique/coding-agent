@@ -461,10 +461,10 @@ class AgentOrchestrator:
             List of parsed FileStructure objects.
         """
         file_structures: list[FileStructure] = []
-        # Read the top ranked source candidates within budget. Five balances
-        # recall (the real fix may span several files) against the LLM's
-        # per-request token budget — more files means each gets less room.
-        for item in candidates[:5]:
+        # Read the top ranked source candidates within budget. Four balances
+        # recall against the LLM's per-request token budget — more files means
+        # each gets less room in the prompt before hitting the model's TPM cap.
+        for item in candidates[:4]:
             path = item.get("path", "")
 
             self._check_budget(state)

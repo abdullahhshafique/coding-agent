@@ -28,8 +28,23 @@ from _env import load_env  # noqa: E402
 load_env()
 
 from coding_agent.evaluator import Evaluator  # noqa: E402
+from coding_agent.llm_tool import LLMTool  # noqa: E402
 from coding_agent.models import RunRequest  # noqa: E402
 from coding_agent.orchestrator import AgentOrchestrator  # noqa: E402
+
+# Phase 3 model choice, resolved empirically (PRD §10 Open Question #1):
+#   - llama-3.3-70b-versatile: capable but its 100k-token/day free-tier quota
+#     is exhausted by iteration + a full run; per-minute caps also throttle.
+#   - llama-3.1-8b-instant: high quota but produces semantically-wrong or
+#     unapplyable diffs (hallucinated refactors, placeholder lines) — fails
+#     validation on most cases.
+#   - openai/gpt-oss-120b: strongest available on Groq free tier, with its own
+#     quota; produces coherent, exact-context diffs. Chosen for the scorecard.
+# This mirrors Open Question #1's instruction to revisit the model on
+# efficiency/quality evidence rather than treat the initial pick as final.
+LLMTool.MODEL = "openai/gpt-oss-120b"
+# 120b tolerates a larger per-request budget than the 8b tier.
+LLMTool._FILE_CONTENT_BUDGET = 2600
 
 DETAIL_FILENAME = "per_case_results.json"
 

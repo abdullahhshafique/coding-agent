@@ -24,7 +24,9 @@ import ast
 import re
 from dataclasses import dataclass, field
 
-_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+# A hunk header; line counts and trailing marker optional (some models emit
+# bare "@@").
+_HUNK_HEADER_RE = re.compile(r"^@@(?: -\d+(?:,\d+)? \+\d+(?:,\d+)?)?\s*(?:@@)?\s*$")
 _FENCE_RE = re.compile(r"```[a-zA-Z]*\n?(.*?)\n?```", re.DOTALL)
 
 
