@@ -258,7 +258,36 @@ iteration — the gap between "diff that textbooks produce" and "diff an LLM
 produces" is where the real work was.
 
 ### Phase 3 Retrospective
-*(not yet completed)*
+
+**Went well:** Phase 3 did exactly what it exists for — it replaced "the demo
+looks like it works" with honest, reproducible numbers and a real diagnosis of
+where the loop breaks. The full 16-case run completed with **0 hard errors**
+(insufficient_context is a designed stop, not a crash), and the evaluation led
+directly to four defect fixes that testing alone never surfaced: identifier-
+focused code search (prose queries returned only CHANGES.md), AST-targeted
+context (the naive head-truncation dropped the very function to patch), a
+token-budget-aware per-file content cap (fixed the 413s), and a whitespace-
+tolerant-but-strict validator (real LLM diffs dropped trailing whitespace and
+emitted bare `@@` headers). Auto-resolving ground truth from merged PRs made
+the test set defensible rather than guessed.
+
+**Didn't go well:** the measured task-completion rate is **6.2%** (1/16), far
+under the ≥ 60% target — and the cause is structural, not plumbing: the model
+produces semantically plausible edits whose diffs don't cleanly apply to the
+current file, or which solve the wrong thing. Also, the Groq free-tier daily
+token quota (100k/day on the chosen 70b model) was silently exhausted by
+iteration, forcing a same-day switch to `gpt-oss-120b` (Open Question #1
+revisited on real efficiency evidence — as that question anticipated).
+
+**Would do differently:** size the test set and smoke-test count against the
+*model's daily token budget* up front, not after; and treat "the patch applies
+AND is semantically correct" as a single validated metric from the start —
+a diff that parses but edits the wrong location performed as "success" while
+being wrong, which inflated the headline number until scoring corrected it.
+
+**Numbers (this phase, recorded):** completion 6.2% · precision 13% · recall
+34% · loop failure 0% · explainability 100% · avg 9.1 tool calls / 32 s per run.
+Full write-up: `docs/phase3_evaluation.md`.
 
 ### Phase 4 Retrospective
 *(not yet completed)*
