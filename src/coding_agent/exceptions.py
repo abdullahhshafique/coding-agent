@@ -33,22 +33,5 @@ class LLMError(CodingAgentError):
     """Base for LLM API errors."""
 
 
-class ValidationError(CodingAgentError):
-    """Base for patch validation errors."""
-
-
 class BudgetExhaustedError(CodingAgentError):
     """Raised when the tool-call budget is exhausted."""
-
-
-class SystemFailureError(CodingAgentError):
-    """Raised for unexpected failures that are not a graceful stopping
-    condition — distinct from BudgetExhaustedError, GitHubNotFoundError,
-    or a validation failure, all of which mean "we correctly determined
-    we can't proceed." This means something broke that shouldn't have.
-
-    The orchestrator maps this to RunResult.status == "error" rather
-    than "insufficient_context", so failure-rate metrics (Evaluator,
-    PRD §4) can distinguish infrastructure breakage from the agent
-    correctly declining to guess.
-    """

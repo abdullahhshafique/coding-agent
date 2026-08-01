@@ -104,10 +104,11 @@ class Evaluator:
         precision = true_positives / len(found) if found else 0.0
         recall = true_positives / len(expected) if expected else 0.0
 
+        # patch_correct stays None here: PRD §4 defines task-completion as
+        # *semantic* correctness of the patch versus the real merged fix, which
+        # requires human judgment, not an auto-check. run_evaluation.py leaves
+        # it None and the scoring pass records the judgment afterward.
         patch_correct = None
-        if run_result.status == "success":
-            # Manual judgment required — placeholder
-            patch_correct = None
 
         return EvaluationRecord(
             test_case=test_case,
