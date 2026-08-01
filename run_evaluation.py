@@ -91,6 +91,11 @@ def main() -> None:
         )
         duration = time.perf_counter() - start
 
+        # Pace cases: each run makes 1–3 Groq calls carrying several KB of
+        # prompt. Groq's on-demand tier caps tokens/min and tokens/day; a short
+        # inter-case gap avoids burning the per-minute budget back-to-back.
+        time.sleep(8)
+
         files_found = _found_files(orch.trace_logger.records)
         record = evaluator.compute_metrics(
             test, result, files_found, len(orch.trace_logger.records), duration

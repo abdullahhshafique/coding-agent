@@ -220,9 +220,13 @@ class PatchValidator:
     def _apply(self, fp: _FilePatch, original: str) -> str:
         """Apply one file's hunks to its original content.
 
-        Hunks are applied sequentially against a mutable line list. Each hunk
-        tries its declared start line first, then searches for its leading
-        context/removal sequence. Raises ValueError on failure.
+        Location is whitespace-tolerant (LLM output often drops a trailing
+        space or shifts indentation), but application still requires the
+        contiguous block of context+removal lines to match once found, so a
+        fuzzy diff cannot silently skip past unmentioned code. Context lines
+        are written back using the FILE's own indentation, so a model that
+        drops leading whitespace cannot corrupt the result. Raises ValueError
+        if no contiguous block matches or the result isn't valid Python.
         """
         lines = original.splitlines()
         offset = 0
@@ -234,75 +238,75 @@ class PatchValidator:
 
             pos = anchor_pos
             delta = 0  # net line-count change introduced by this hunk
+            last_indent = ""  # indent of the last matched original line
             for hl in hunk.lines:
                 if hl.tag == "add":
-                    # Insertion: emit before the next existing matched line.
-                    lines.insert(pos, hl.text)
+                    # Insert the model's replacement line. If the model dropped
+                    # leading whitespace entirely, inherit the indentation of
+                    # the line this hunk just matched/removed so the inserted
+                    # line stays at the right nesting level.
+                    text = hl.text
+                    if text and not text[:1].isspace():
+                        text = last_indent + text
+                    lines.insert(pos, text)
                     pos += 1
                     delta += 1
                     continue
-                # context / remove must match the CURRENT line exactly. This
-                # is deliberately strict: silently skipping past non-matching
-                # lines here would let a fuzzy diff delete or leapfrog code it
-                # never mentions, which a human reviewer would not expect.
-                # Lenient *location* (above) handles fuzzy header offsets;
-                # strict *application* keeps the edit auditable.
-                if pos >= len(lines) or lines[pos] != hl.text:
+                # context / remove: must match the current original line
+                # after whitespace-normalisation; verified again per line.
+                if pos >= len(lines) or not self._same_code(lines[pos], hl.text):
                     raise ValueError(
                         f"{hl.tag} mismatch at line {pos + 1}: "
-                        f"expected {hl.text!r}"
+                        f"expected {hl.text.strip()!r}, got "
+                        f"{(lines[pos].strip() if pos < len(lines) else None)!r}"
                     )
-                if hl.tag == "context":
-                    pos += 1
-                else:  # remove
+                cur = lines[pos]
+                last_indent = cur[: len(cur) - len(cur.lstrip())]
+                if hl.tag == "remove":
                     lines.pop(pos)
                     delta -= 1
+                else:  # context: keep the original line as-is
+                    pos += 1
             offset += delta
 
         return "\n".join(lines) + ("\n" if original.endswith("\n") else "")
 
     @staticmethod
-    def _hunks_match(lines: list[str], start: int, key: list[str]) -> bool:
-        """Return True if ``key`` lines appear in ``lines`` from ``start``.
+    def _same_code(a: str, b: str) -> bool:
+        """True if two lines are the same up to leading/trailing whitespace."""
+        return a.strip() == b.strip()
 
-        ``key`` (context + removal lines) is matched as an order-preserving
-        subsequence: each line must appear at or after the previous match.
-        This tolerates the extra/missing lines a wrong hunk header implies.
-        """
-        pos = start
-        for want in key:
-            found = False
-            while pos < len(lines):
-                if lines[pos] == want:
-                    found = True
-                    pos += 1
-                    break
-                pos += 1
-            if not found:
-                return False
-        return True
+    @staticmethod
+    def _hunks_match(lines: list[str], start: int, key: list[str]) -> bool:
+        """Return True if ``key`` (context+removal lines) appears in ``lines``
+        as a contiguous block starting at ``start``, up to whitespace. Strict
+        adjacency is required for the match to be meaningful at apply time —
+        subsequence matching would let a fuzzy diff skip unrelated code."""
+        if start + len(key) > len(lines):
+            return False
+        return all(
+            PatchValidator._same_code(lines[start + i], want)
+            for i, want in enumerate(key)
+        )
 
     @staticmethod
     def _locate(hunk: _Hunk, lines: list[str], guess: int) -> int | None:
-        """Find where a hunk applies, preferring the declared line, then near it.
+        """Find where a hunk's context/removal block applies.
 
-        The anchor is the hunk's *first* non-added (context/removal) line,
-        which must already exist in the original. Search radiates outward from
-        the declared position so a wrong or fuzzy header offset still applies;
-        ties prefer the nearer candidate, then the earlier one.
+        Matching is whitespace-tolerant (lines compared after ``strip()``) so
+        model whitespace drift doesn't reject an otherwise-valid diff. The
+        search prefers the declared start line, then radiates outward so a
+        wrong/fuzzy ``@@`` offset still applies. Pure-insertion hunks apply at
+        their declared position.
         """
         key = [hl.text for hl in hunk.lines if hl.tag != "add"]
         if not key:
-            # Pure-insertion hunk: apply at the declared position (clamped).
             return max(0, min(guess, len(lines)))
 
-        anchor = key[0]
         n = len(lines)
         best: int | None = None
         best_dist: int | None = None
         for cand in range(n):
-            if lines[cand] != anchor:
-                continue
             if not PatchValidator._hunks_match(lines, cand, key):
                 continue
             dist = abs(cand - guess)
