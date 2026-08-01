@@ -6,7 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "coding-agent"
 version = "0.1.0"
 description = "An AI coding agent that finds and patches bugs in GitHub repos"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [{name = "Abdullah Shafique", email = "abdullahsahafique2019@gmail.com"}]
+keywords = ["agent", "llm", "github", "ast", "patch", "cli", "groq"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development",
+]
 dependencies = [
     "requests>=2.32.3",
     "groq>=1.6.0",
